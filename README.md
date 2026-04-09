@@ -127,7 +127,7 @@ Tested on macOS (Apple Silicon, M3 Pro 18GB). Should work on Linux; Windows unte
 
 ```bash
 # Clone
-git clone https://github.com/YOUR-USERNAME/llm-wiki.git
+git clone https://github.com/NiharShrotri/llm-wiki.git
 cd llm-wiki
 
 # Create a virtual environment (uv is faster than pip, either works)
