@@ -57,6 +57,15 @@ class _SSECallbacks(query_module.QueryCallbacks):
     def on_start(self, question: str, mode: str) -> None:
         self.q.put(("start", {"question": question, "mode": mode}))
 
+    def on_classifying_intent(self) -> None:
+        self.q.put(("status", {"text": "Understanding your question…"}))
+
+    def on_intent_classified(self, intent: str) -> None:
+        self.q.put(("intent", {"intent": intent}))
+
+    def on_chitchat_reply(self, reply: str) -> None:
+        self.q.put(("chitchat", {"text": reply}))
+
     def on_searching(self) -> None:
         self.q.put(("status", {"text": "Searching wiki…"}))
 
@@ -93,11 +102,19 @@ class _SSECallbacks(query_module.QueryCallbacks):
 
 
 @router.get("/query/stream")
-async def query_stream(request: Request, q: str) -> StreamingResponse:
+async def query_stream(
+    request: Request,
+    q: str,
+    scope: str = "wiki",  # 'wiki' | 'raw' | 'hybrid'
+) -> StreamingResponse:
     """SSE stream: run the query in a worker thread, pipe progress events."""
     paths: cfg.WikiPaths = request.app.state.wiki_paths
     config = cfg.load_config(paths)
     llm_cfg = config.get("llm", {})
+
+    # Validate scope
+    if scope not in ("wiki", "raw", "hybrid"):
+        scope = "wiki"
 
     event_q: "queue.Queue[tuple[str, Any]]" = queue.Queue()
     done_event = threading.Event()
@@ -127,6 +144,8 @@ async def query_stream(request: Request, q: str) -> StreamingResponse:
                     min_score=0.0,
                     rerank=True,
                     save_as=None,
+                    scope=scope,
+                    classify_intent_first=True,
                 )
                 result_holder["result"] = result
             except Exception as e:

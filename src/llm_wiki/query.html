@@ -1,0 +1,482 @@
+{% extends "base.html" %}
+
+{% block title %}Query — LLM-Wiki{% endblock %}
+
+{% block extra_head %}
+<style>
+    .markdown-body { line-height: 1.65; }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+        font-weight: 600;
+        margin-top: 1.2em;
+        margin-bottom: 0.5em;
+        color: #fff;
+    }
+    .markdown-body h1 { font-size: 1.5em; }
+    .markdown-body h2 { font-size: 1.25em; }
+    .markdown-body h3 { font-size: 1.1em; }
+    .markdown-body p { margin: 0.6em 0; }
+    .markdown-body ul, .markdown-body ol { margin: 0.6em 0; padding-left: 1.5em; }
+    .markdown-body li { margin: 0.3em 0; }
+    .markdown-body code {
+        background: #0f1117;
+        padding: 0.15em 0.4em;
+        border-radius: 3px;
+        font-size: 0.9em;
+        color: #9aa7ff;
+    }
+    .markdown-body strong { color: #fff; font-weight: 600; }
+    .markdown-body a, .markdown-body .wikilink {
+        color: #7c8cff;
+        text-decoration: none;
+    }
+    .markdown-body a:hover { text-decoration: underline; }
+    .stream-cursor::after {
+        content: '▌';
+        color: #7c8cff;
+        animation: blink 1s steps(1) infinite;
+    }
+    @keyframes blink {
+        50% { opacity: 0; }
+    }
+    /* Loading spinner — pulsing dots */
+    .loading-dots {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+    }
+    .loading-dots span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #7c8cff;
+        animation: pulse-dot 1.4s ease-in-out infinite both;
+    }
+    .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes pulse-dot {
+        0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    /* Pipeline stage indicator */
+    .stage-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #0f1117;
+        border: 1px solid #2a2e3a;
+        border-radius: 6px;
+        font-size: 13px;
+        color: #9ca3af;
+    }
+    .stage-indicator.active {
+        border-color: #7c8cff;
+        color: #e7e9f0;
+    }
+    .stage-icon {
+        width: 18px;
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .elapsed-counter {
+        font-size: 11px;
+        color: #6b7280;
+        margin-left: auto;
+        font-variant-numeric: tabular-nums;
+    }
+    /* Scope toggle */
+    .scope-btn {
+        background: transparent;
+        color: #9ca3af;
+        cursor: pointer;
+        border: none;
+    }
+    .scope-btn:hover {
+        color: #e7e9f0;
+    }
+    .scope-btn.active {
+        background: #1c1f2a;
+        color: #fff;
+        box-shadow: 0 0 0 1px #7c8cff;
+    }
+    /* Chitchat reply (smaller, no hits) */
+    .chitchat-reply {
+        font-style: italic;
+        color: #9ca3af;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="mb-6">
+    <h1 class="text-3xl font-semibold text-white mb-1">Query</h1>
+    <p class="text-sm text-[#9ca3af]">Ask a question. The wiki searches itself and synthesizes a cited answer.</p>
+</div>
+
+<!-- Chat history -->
+<div id="chat-history" class="space-y-6 mb-6">
+    <!-- Messages get appended here as users ask questions -->
+</div>
+
+<!-- Example queries (shown until first query) -->
+<div id="example-queries" class="bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg p-6 mb-6">
+    <div class="text-xs text-[#6b7280] uppercase tracking-wide mb-3">Example questions to try</div>
+    <div class="grid grid-cols-2 gap-2">
+        <button class="example-btn text-left text-sm px-3 py-2 bg-[#0f1117] hover:bg-[#161922] border border-[#2a2e3a] hover:border-[#7c8cff] rounded text-[#9ca3af] hover:text-white transition">
+            What are the main themes in my wiki?
+        </button>
+        <button class="example-btn text-left text-sm px-3 py-2 bg-[#0f1117] hover:bg-[#161922] border border-[#2a2e3a] hover:border-[#7c8cff] rounded text-[#9ca3af] hover:text-white transition">
+            Who are the key people mentioned?
+        </button>
+        <button class="example-btn text-left text-sm px-3 py-2 bg-[#0f1117] hover:bg-[#161922] border border-[#2a2e3a] hover:border-[#7c8cff] rounded text-[#9ca3af] hover:text-white transition">
+            What are the most-referenced concepts?
+        </button>
+        <button class="example-btn text-left text-sm px-3 py-2 bg-[#0f1117] hover:bg-[#161922] border border-[#2a2e3a] hover:border-[#7c8cff] rounded text-[#9ca3af] hover:text-white transition">
+            Summarize the main argument across sources.
+        </button>
+    </div>
+</div>
+
+<!-- Scope toggle -->
+<div class="bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg p-3 mb-3 flex items-center gap-3">
+    <span class="text-xs text-[#9ca3af] uppercase tracking-wide">Search scope:</span>
+    <div class="flex items-center gap-1 bg-[#0f1117] rounded-md p-1">
+        <button type="button" data-scope="wiki"
+                class="scope-btn active text-xs px-3 py-1.5 rounded font-medium transition">
+            📖 Wiki
+        </button>
+        <button type="button" data-scope="raw"
+                class="scope-btn text-xs px-3 py-1.5 rounded font-medium transition">
+            📥 Raw
+        </button>
+        <button type="button" data-scope="hybrid"
+                class="scope-btn text-xs px-3 py-1.5 rounded font-medium transition">
+            🔀 Hybrid
+        </button>
+    </div>
+    <span id="scope-help" class="text-xs text-[#6b7280]">Searches LLM-summarized wiki pages (best for thematic questions).</span>
+</div>
+
+<!-- Input form -->
+<form id="query-form" class="bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg p-2 flex items-center gap-2">
+    <input type="text"
+           id="query-input"
+           name="q"
+           placeholder="Ask a question…"
+           autocomplete="off"
+           class="flex-1 bg-transparent px-3 py-2 text-white placeholder-[#6b7280] focus:outline-none">
+    <button type="submit"
+            id="query-submit"
+            class="px-4 py-2 bg-[#7c8cff] hover:bg-[#9aa7ff] text-white rounded-md font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
+        Ask
+    </button>
+</form>
+
+<script>
+(function() {
+    const form = document.getElementById('query-form');
+    const input = document.getElementById('query-input');
+    const submitBtn = document.getElementById('query-submit');
+    const history = document.getElementById('chat-history');
+    const examples = document.getElementById('example-queries');
+
+    // Scope toggle state
+    let currentScope = 'wiki';
+    const scopeHelpText = {
+        wiki: 'Searches LLM-summarized wiki pages (best for thematic questions).',
+        raw: 'Searches original source documents (best for exact lookups, dates, names).',
+        hybrid: 'Searches both wiki summaries and raw sources (best of both worlds).',
+    };
+    document.querySelectorAll('.scope-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.scope-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentScope = btn.dataset.scope;
+            document.getElementById('scope-help').textContent = scopeHelpText[currentScope];
+        });
+    });
+
+    // Wire example buttons
+    document.querySelectorAll('.example-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            input.value = btn.textContent.trim();
+            form.dispatchEvent(new Event('submit'));
+        });
+    });
+
+    // Naive markdown → HTML for streaming output. Handles wikilinks, bold,
+    // headers, code, lists. Not a full parser — good enough for Qwen3 output.
+    function renderMarkdown(text) {
+        // Escape HTML
+        let html = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        // Wikilinks [[foo/bar]] → highlighted span
+        html = html.replace(/\[\[([^\]]+?)\]\]/g, '<span class="wikilink">[[$1]]</span>');
+        // Headers
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        // Bold
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        // Italic (very loose)
+        html = html.replace(/(?<![*])\*([^*\n]+)\*(?![*])/g, '<em>$1</em>');
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        // Lists (simple)
+        html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m + '</ul>');
+        // Numbered lists
+        html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+        // Paragraphs
+        html = html.split(/\n\n+/).map(block => {
+            if (block.trim().startsWith('<') || !block.trim()) return block;
+            return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
+        }).join('\n');
+        return html;
+    }
+
+    function addUserMessage(question) {
+        const div = document.createElement('div');
+        div.className = 'flex justify-end';
+        div.innerHTML = `
+            <div class="max-w-2xl bg-[#7c8cff]/20 border border-[#7c8cff]/40 rounded-lg px-4 py-3">
+                <div class="text-xs text-[#9aa7ff] uppercase tracking-wide mb-1">You</div>
+                <div class="text-sm text-white">${question.replace(/</g, '&lt;')}</div>
+            </div>
+        `;
+        history.appendChild(div);
+        return div;
+    }
+
+    function addAssistantMessage() {
+        const div = document.createElement('div');
+        div.className = 'bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg p-5';
+        div.innerHTML = `
+            <div class="text-xs text-[#9ca3af] uppercase tracking-wide mb-3 flex items-center gap-2">
+                <span>Wiki</span>
+            </div>
+            <div class="stage-indicator active mb-4">
+                <span class="stage-icon">
+                    <span class="loading-dots"><span></span><span></span><span></span></span>
+                </span>
+                <span class="status-line">Connecting…</span>
+                <span class="elapsed-counter">0.0s</span>
+            </div>
+            <div class="hits-container hidden mb-4"></div>
+            <div class="answer-container markdown-body text-sm text-[#e7e9f0]"></div>
+            <div class="actions-container hidden mt-4 pt-4 border-t border-[#2a2e3a] flex items-center gap-2"></div>
+        `;
+        history.appendChild(div);
+        return div;
+    }
+
+    function renderHits(container, hits) {
+        if (!hits.length) {
+            container.innerHTML = '<div class="text-xs text-[#6b7280]">No matching pages found.</div>';
+            container.classList.remove('hidden');
+            return;
+        }
+        const itemsHtml = hits.map((h, i) => `
+            <div class="flex items-start gap-3 p-2 rounded hover:bg-[#0f1117] transition">
+                <div class="text-xs font-mono text-[#6b7280] w-8">${i + 1}.</div>
+                <div class="text-xs font-mono text-[#9aa7ff] w-12">${(h.score * 100).toFixed(0)}%</div>
+                <div class="text-xs text-white truncate">${h.title}</div>
+                <div class="text-xs text-[#6b7280] truncate ml-auto font-mono">${h.path}</div>
+            </div>
+        `).join('');
+        container.innerHTML = `
+            <div class="text-xs text-[#6b7280] uppercase tracking-wide mb-2">${hits.length} relevant page${hits.length === 1 ? '' : 's'}</div>
+            ${itemsHtml}
+        `;
+        container.classList.remove('hidden');
+    }
+
+    function showSaveButton(actionsContainer, question, answer) {
+        actionsContainer.innerHTML = `
+            <input type="text" class="save-slug bg-[#0f1117] border border-[#2a2e3a] rounded px-3 py-1.5 text-sm text-white placeholder-[#6b7280] focus:outline-none focus:border-[#7c8cff]" placeholder="synthesis-slug">
+            <button class="save-btn px-3 py-1.5 bg-[#1c1f2a] border border-[#7c8cff] text-[#7c8cff] hover:bg-[#7c8cff] hover:text-white rounded text-sm font-medium transition">
+                Save as synthesis page
+            </button>
+            <span class="save-status text-xs text-[#6b7280] ml-2"></span>
+        `;
+        actionsContainer.classList.remove('hidden');
+
+        const saveBtn = actionsContainer.querySelector('.save-btn');
+        const slugInput = actionsContainer.querySelector('.save-slug');
+        const statusEl = actionsContainer.querySelector('.save-status');
+
+        saveBtn.addEventListener('click', async () => {
+            const slug = slugInput.value.trim();
+            if (!slug) {
+                statusEl.textContent = 'Enter a slug first';
+                statusEl.className = 'save-status text-xs text-yellow-400 ml-2';
+                return;
+            }
+            saveBtn.disabled = true;
+            statusEl.textContent = 'Saving…';
+            statusEl.className = 'save-status text-xs text-[#9ca3af] ml-2';
+
+            const fd = new FormData();
+            fd.append('question', question);
+            fd.append('answer', answer);
+            fd.append('slug', slug);
+
+            try {
+                const r = await fetch('/query/save', { method: 'POST', body: fd });
+                const data = await r.json();
+                if (data.ok) {
+                    statusEl.textContent = '✓ Saved as ' + data.saved_path;
+                    statusEl.className = 'save-status text-xs text-green-400 ml-2';
+                    saveBtn.textContent = 'Saved';
+                } else {
+                    statusEl.textContent = '✗ ' + (data.error || 'failed');
+                    statusEl.className = 'save-status text-xs text-red-400 ml-2';
+                    saveBtn.disabled = false;
+                }
+            } catch (e) {
+                statusEl.textContent = '✗ ' + e.message;
+                statusEl.className = 'save-status text-xs text-red-400 ml-2';
+                saveBtn.disabled = false;
+            }
+        });
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const question = input.value.trim();
+        if (!question) return;
+        input.value = '';
+        submitBtn.disabled = true;
+        if (examples) examples.style.display = 'none';
+
+        addUserMessage(question);
+        const assistantEl = addAssistantMessage();
+        const statusEl = assistantEl.querySelector('.status-line');
+        const stageEl = assistantEl.querySelector('.stage-indicator');
+        const elapsedEl = assistantEl.querySelector('.elapsed-counter');
+        const hitsEl = assistantEl.querySelector('.hits-container');
+        const answerEl = assistantEl.querySelector('.answer-container');
+        const actionsEl = assistantEl.querySelector('.actions-container');
+
+        // Tick the elapsed counter every 100ms while the query runs
+        const startTime = performance.now();
+        const elapsedTimer = setInterval(() => {
+            const seconds = (performance.now() - startTime) / 1000;
+            elapsedEl.textContent = seconds.toFixed(1) + 's';
+        }, 100);
+
+        function stopTimer() {
+            clearInterval(elapsedTimer);
+            const finalSeconds = ((performance.now() - startTime) / 1000).toFixed(1);
+            elapsedEl.textContent = finalSeconds + 's total';
+        }
+
+        let accumulatedAnswer = '';
+        let firstChunkReceived = false;
+
+        // Stream via EventSource
+        const url = '/query/stream?q=' + encodeURIComponent(question) + '&scope=' + currentScope;
+        const es = new EventSource(url);
+
+        es.addEventListener('status', (ev) => {
+            const data = JSON.parse(ev.data);
+            statusEl.textContent = data.text || '';
+        });
+
+        es.addEventListener('intent', (ev) => {
+            const data = JSON.parse(ev.data);
+            if (data.intent === 'chitchat') {
+                statusEl.textContent = 'Casual question — replying directly…';
+            } else {
+                statusEl.textContent = 'Wiki question — searching…';
+            }
+        });
+
+        es.addEventListener('chitchat', (ev) => {
+            const data = JSON.parse(ev.data);
+            // Chitchat reply: no hits, italic styled, no save button
+            answerEl.innerHTML = '<div class="chitchat-reply">' + data.text.replace(/</g, '&lt;') + '</div>';
+            answerEl.classList.remove('stream-cursor');
+            statusEl.textContent = '✓ Done (no search needed)';
+            const icon = stageEl.querySelector('.stage-icon');
+            if (icon) icon.innerHTML = '<span class="text-green-400">✓</span>';
+            stageEl.classList.remove('active');
+            stopTimer();
+            es.close();
+            submitBtn.disabled = false;
+            // No save button for chitchat — those aren't worth saving as synthesis pages
+        });
+
+        es.addEventListener('hits', (ev) => {
+            const data = JSON.parse(ev.data);
+            renderHits(hitsEl, data.hits);
+            statusEl.textContent = 'Synthesizing answer with Qwen3…';
+        });
+
+        es.addEventListener('chunk', (ev) => {
+            const data = JSON.parse(ev.data);
+            if (!firstChunkReceived) {
+                firstChunkReceived = true;
+                statusEl.textContent = 'Streaming…';
+            }
+            accumulatedAnswer += data.text || '';
+            answerEl.innerHTML = renderMarkdown(accumulatedAnswer);
+            answerEl.classList.add('stream-cursor');
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        es.addEventListener('complete', (ev) => {
+            const data = JSON.parse(ev.data);
+            const finalAnswer = data.answer || accumulatedAnswer;
+            answerEl.innerHTML = renderMarkdown(finalAnswer);
+            answerEl.classList.remove('stream-cursor');
+            statusEl.textContent = '✓ Done';
+            // Replace the dots with a static checkmark
+            const icon = stageEl.querySelector('.stage-icon');
+            if (icon) icon.innerHTML = '<span class="text-green-400">✓</span>';
+            stageEl.classList.remove('active');
+            stopTimer();
+            es.close();
+            submitBtn.disabled = false;
+            showSaveButton(actionsEl, question, finalAnswer);
+        });
+
+        es.addEventListener('error', (ev) => {
+            try {
+                const data = JSON.parse(ev.data);
+                if (data && data.text) {
+                    answerEl.innerHTML = '<div class="text-red-400 text-sm">Error: ' + data.text + '</div>';
+                    statusEl.textContent = '✗ Failed';
+                }
+            } catch (e) {
+                if (es.readyState === EventSource.CLOSED) {
+                    if (!accumulatedAnswer) {
+                        answerEl.innerHTML = '<div class="text-red-400 text-sm">Connection closed.</div>';
+                    }
+                }
+            }
+            answerEl.classList.remove('stream-cursor');
+            const icon = stageEl.querySelector('.stage-icon');
+            if (icon) icon.innerHTML = '<span class="text-red-400">✗</span>';
+            stageEl.classList.remove('active');
+            stopTimer();
+            es.close();
+            submitBtn.disabled = false;
+        });
+
+        es.addEventListener('done', () => {
+            answerEl.classList.remove('stream-cursor');
+            stopTimer();
+            es.close();
+            submitBtn.disabled = false;
+        });
+    });
+})();
+</script>
+
+{% endblock %}

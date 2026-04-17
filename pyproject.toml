@@ -1,6 +1,6 @@
 [project]
 name = "llm-wiki"
-version = "0.6.0"
+version = "0.8.1"
 description = "An LLM-maintained personal wiki, per Karpathy's pattern. Local-first, enterprise-grade."
 readme = "README.md"
 requires-python = ">=3.11"

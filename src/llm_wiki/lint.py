@@ -750,6 +750,15 @@ def apply_fixes(paths: cfg.WikiPaths, issues: list[LintIssue]) -> int:
         new_report = run_lint(paths, deep=False, client=None)
         current_issues = new_report.issues
 
+    # Refresh the QMD search index so modified pages are reflected in queries.
+    # Only runs if we actually modified anything. Non-fatal on failure.
+    if total_modified > 0:
+        try:
+            from . import search
+            search.update_index(paths, embed=True)
+        except Exception:
+            pass
+
     return total_modified
 
 

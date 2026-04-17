@@ -275,6 +275,37 @@ def get_source(paths: cfg.WikiPaths, source_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def mark_source_pending(
+    paths: cfg.WikiPaths, source_id: int
+) -> tuple[bool, str]:
+    """Reset a source's status to 'pending' so it can be re-ingested.
+
+    Doesn't touch any wiki pages that were created from this source —
+    re-ingestion will use the merge path on existing pages, or create
+    new ones with new content. Useful when:
+
+    - You blocked an earlier ingest mid-flight
+    - You want Qwen to re-process the source with updated prompts
+    - The previous extraction was poor quality and you want to try again
+    """
+    row = get_source(paths, source_id)
+    if row is None:
+        return False, f"No source with id {source_id}"
+
+    file_path = paths.root / row["relpath"]
+    if not file_path.exists():
+        return False, f"Source file no longer on disk: {row['relpath']}"
+
+    with db.connect(paths.state_db) as conn:
+        conn.execute(
+            "UPDATE sources SET status = 'pending', last_ingested = NULL WHERE id = ?",
+            (source_id,),
+        )
+        conn.commit()
+
+    return True, f"Marked #{source_id} ({row['relpath']}) as pending"
+
+
 def remove_source(
     paths: cfg.WikiPaths, source_id: int, delete_file: bool = True
 ) -> tuple[bool, str]:

@@ -9,9 +9,26 @@
     <a href="/sources" class="hover:text-[#9aa7ff] transition">← Sources</a>
 </div>
 
-<div class="mb-6">
-    <h1 class="text-2xl font-semibold text-white mb-1">{{ title }}</h1>
-    <p class="text-sm text-[#9ca3af] font-mono">{{ source.relpath }}</p>
+<div class="mb-6 flex items-start justify-between gap-4">
+    <div class="min-w-0 flex-1">
+        <h1 class="text-2xl font-semibold text-white mb-1">{{ title }}</h1>
+        <p class="text-sm text-[#9ca3af] font-mono truncate">{{ source.relpath }}</p>
+    </div>
+    <div class="flex items-center gap-2 flex-shrink-0">
+        <form method="post" action="/sources/{{ source.id }}/reingest" class="inline">
+            <button type="submit"
+                    class="text-xs px-3 py-1.5 bg-[#1c1f2a] border border-[#7c8cff] text-[#7c8cff] hover:bg-[#7c8cff] hover:text-white rounded font-medium transition">
+                ↻ Re-ingest
+            </button>
+        </form>
+        <form method="post" action="/sources/{{ source.id }}/delete" class="inline"
+              onsubmit="return confirm('Delete this source? The file will be removed from raw/ and the database entry deleted. Wiki pages created from this source will stay (run lint --fix to clean up orphans).');">
+            <button type="submit"
+                    class="text-xs px-3 py-1.5 bg-[#1c1f2a] border border-red-500/40 text-red-400 hover:bg-red-500/20 hover:border-red-500 rounded font-medium transition">
+                🗑 Delete
+            </button>
+        </form>
+    </div>
 </div>
 
 {% if error %}

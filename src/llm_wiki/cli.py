@@ -785,6 +785,22 @@ class CliQueryCallbacks(query_module.QueryCallbacks):
         console.print(f"[dim]mode: {mode}[/dim]")
         console.print()
 
+    def on_classifying_intent(self) -> None:
+        console.print("[dim]  understanding question…[/dim]")
+
+    def on_intent_classified(self, intent: str) -> None:
+        if intent == "chitchat":
+            console.print("[dim]  → casual question, no search needed[/dim]")
+        else:
+            console.print("[dim]  → wiki question, searching…[/dim]")
+
+    def on_chitchat_reply(self, reply: str) -> None:
+        console.print()
+        console.print("[dim]" + "─" * 72 + "[/dim]")
+        console.print(reply)
+        console.print("[dim]" + "─" * 72 + "[/dim]")
+        console.print()
+
     def on_searching(self) -> None:
         console.print("[dim]  searching wiki (BM25 + vector + rerank)…[/dim]")
 
@@ -871,6 +887,16 @@ def query(
         "--save-as",
         help="Save the answer as wiki/synthesis/<slug>.md and update the index.",
     ),
+    scope: str = typer.Option(
+        "wiki",
+        "--scope",
+        help="Search scope: wiki (LLM-summarized pages), raw (original docs), or hybrid (both).",
+    ),
+    no_intent_classify: bool = typer.Option(
+        False,
+        "--no-intent-classify",
+        help="Skip intent classification step (saves ~3 sec per query).",
+    ),
 ) -> None:
     """Ask a question: search the wiki, synthesize an answer with citations.
 
@@ -891,6 +917,10 @@ def query(
         mode = "vec"
     if mode not in ("hybrid", "lex", "vec"):
         _err(f"Invalid mode '{mode}'. Use hybrid, lex, or vec.")
+        raise typer.Exit(code=1)
+
+    if scope not in ("wiki", "raw", "hybrid"):
+        _err(f"Invalid scope '{scope}'. Use wiki, raw, or hybrid.")
         raise typer.Exit(code=1)
 
     # Sanity checks
@@ -939,6 +969,8 @@ def query(
             min_score=min_score,
             rerank=not no_rerank,
             save_as=save_as,
+            scope=scope,
+            classify_intent_first=not no_intent_classify,
         )
     finally:
         client.close()

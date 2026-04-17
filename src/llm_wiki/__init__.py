@@ -1,3 +1,3 @@
 """LLM-Wiki: An LLM-maintained personal knowledge base."""
 
-__version__ = "0.6.0"
+__version__ = "0.8.1"

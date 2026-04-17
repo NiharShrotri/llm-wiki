@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -60,21 +60,63 @@ CREATE TABLE IF NOT EXISTS source_pages (
     PRIMARY KEY (source_id, wiki_path, at),
     FOREIGN KEY (source_id) REFERENCES sources(id)
 );
+
+-- Phase 2: persistent ingest jobs — survive tab close, restart, etc.
+CREATE TABLE IF NOT EXISTS ingest_jobs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id       INTEGER NOT NULL,
+    state           TEXT NOT NULL DEFAULT 'queued',
+                    -- queued|running|done|failed|interrupted
+    phase           TEXT,                    -- latest phase label
+    progress        REAL DEFAULT 0.0,        -- 0.0..1.0
+    pages_created   INTEGER DEFAULT 0,
+    pages_updated   INTEGER DEFAULT 0,
+    error           TEXT,
+    created_at      TEXT NOT NULL,
+    started_at      TEXT,
+    finished_at     TEXT,
+    FOREIGN KEY (source_id) REFERENCES sources(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_state ON ingest_jobs(state);
+CREATE INDEX IF NOT EXISTS idx_jobs_source ON ingest_jobs(source_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_created ON ingest_jobs(created_at);
+
+-- Per-job event log — used for live progress + rejoin-on-reload
+CREATE TABLE IF NOT EXISTS job_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id          INTEGER NOT NULL,
+    seq             INTEGER NOT NULL,        -- monotonic per job
+    kind            TEXT NOT NULL,           -- status|extracted|page|chunk|error|done
+    data            TEXT NOT NULL,           -- JSON payload
+    at              TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES ingest_jobs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_job_seq ON job_events(job_id, seq);
 """
 
 
 def init_db(db_path: Path) -> None:
-    """Create the state database and apply the schema. Idempotent."""
+    """Create the state database and apply the schema. Idempotent.
+
+    Also performs lightweight migrations for pre-Phase-2 databases.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.executescript(SCHEMA_SQL)
-        # Record schema version on first init
         cur = conn.execute("SELECT version FROM schema_version LIMIT 1")
         row = cur.fetchone()
         if row is None:
             conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
             )
+        else:
+            # Bump version silently if already migrated above (CREATE IF NOT EXISTS).
+            if row[0] < SCHEMA_VERSION:
+                conn.execute(
+                    "UPDATE schema_version SET version = ?", (SCHEMA_VERSION,)
+                )
         conn.commit()
 
 

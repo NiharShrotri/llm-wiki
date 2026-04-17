@@ -61,6 +61,12 @@ class QueryCallbacks:
 
     def on_start(self, question: str, mode: str) -> None: ...
 
+    def on_classifying_intent(self) -> None: ...
+
+    def on_intent_classified(self, intent: str) -> None: ...
+
+    def on_chitchat_reply(self, reply: str) -> None: ...
+
     def on_searching(self) -> None: ...
 
     def on_search_done(self, results: search.SearchResults) -> None: ...
@@ -229,12 +235,48 @@ def run_query(
     rerank: bool = True,
     save_as: str | None = None,
     temperature: float = 0.3,
+    scope: str = "wiki",  # 'wiki' | 'raw' | 'hybrid'
+    classify_intent_first: bool = True,
 ) -> QueryResult:
-    """Run a full query → answer pipeline."""
+    """Run a full query → answer pipeline.
+
+    scope determines which QMD collection(s) to search:
+        - 'wiki'   → llm-wiki-pages only (LLM-summarized knowledge)
+        - 'raw'    → llm-wiki-raw only (original source documents)
+        - 'hybrid' → both, results merged
+
+    classify_intent_first runs intent classification before retrieval. If
+    the user asked something like 'hi' or 'thanks', we skip retrieval and
+    respond conversationally.
+    """
     callbacks.on_start(question, mode)
 
-    # 1. Search
+    # 0. Intent classification — skip retrieval for chitchat
+    if classify_intent_first:
+        from . import intent as intent_module
+
+        callbacks.on_classifying_intent()
+        intent_result = intent_module.classify_intent(client, question)
+        callbacks.on_intent_classified(intent_result.intent)
+
+        if intent_result.intent == "chitchat":
+            reply = intent_module.generate_chitchat_reply(client, question)
+            callbacks.on_chitchat_reply(reply)
+            result = QueryResult(question=question, answer=reply, hits=[])
+            callbacks.on_complete(result)
+            return result
+
+    # 1. Search — pick collections based on scope
     callbacks.on_searching()
+    if scope == "wiki":
+        collections_to_search: list[str] | None = ["llm-wiki-pages"]
+    elif scope == "raw":
+        collections_to_search = ["llm-wiki-raw"]
+    elif scope == "hybrid":
+        collections_to_search = ["llm-wiki-pages", "llm-wiki-raw"]
+    else:
+        collections_to_search = None  # use QMD default (all collections)
+
     try:
         results = search.query(
             paths,
@@ -242,6 +284,7 @@ def run_query(
             mode=mode,
             limit=limit,
             min_score=min_score,
+            collections=collections_to_search,
             hydrate=True,
             rerank=rerank,
         )

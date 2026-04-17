@@ -1,262 +1,297 @@
 {% extends "base.html" %}
 
-{% block title %}Ingest — LLM-Wiki{% endblock %}
-
 {% block extra_head %}
 <style>
-    .loading-dots {
-        display: inline-flex;
-        gap: 4px;
-        align-items: center;
-        margin-left: 4px;
+    .drop-zone {
+        border: 2px dashed #2a2e3a;
+        transition: all 0.15s ease;
     }
-    .loading-dots span {
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: #9aa7ff;
-        animation: pulse-dot 1.4s ease-in-out infinite both;
+    .drop-zone.dragover {
+        border-color: #7c8cff;
+        background: #1a1e2c;
     }
-    .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
-    .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
-    @keyframes pulse-dot {
-        0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
-        40% { transform: scale(1); opacity: 1; }
+    .state-badge { font-size: 10px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+    .state-queued      { background: rgba(156, 163, 175, 0.15); color: #9ca3af; }
+    .state-running     { background: rgba(124, 140, 255, 0.2); color: #9aa7ff; }
+    .state-done        { background: rgba(34, 197, 94, 0.15);  color: #4ade80; }
+    .state-failed      { background: rgba(239, 68, 68, 0.18);  color: #f87171; }
+    .state-interrupted { background: rgba(234, 179, 8, 0.18);  color: #facc15; }
+    .job-card { transition: background 0.15s ease; }
+    .job-card:hover { background: #1c1f2a; }
+    .progress-bar-bg { background: #0f1117; height: 6px; border-radius: 3px; overflow: hidden; }
+    .progress-bar-fill { background: #7c8cff; height: 100%; transition: width 0.3s ease; }
+    .live-log {
+        background: #0f1117;
+        border: 1px solid #2a2e3a;
+        border-radius: 6px;
+        padding: 12px;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: 12px;
+        line-height: 1.6;
     }
+    .log-line { margin-bottom: 2px; }
+    .log-status { color: #9aa7ff; }
+    .log-page   { color: #4ade80; }
+    .log-error  { color: #f87171; }
+    .log-extracted { background: #1c1f2a; border-radius: 4px; padding: 8px; margin: 6px 0; }
 </style>
 {% endblock %}
 
 {% block content %}
 
 <div class="mb-6">
-    <h1 class="text-3xl font-semibold text-white mb-1">Ingest</h1>
-    <p class="text-sm text-[#9ca3af]">Upload sources and watch Qwen3 read them in real time.</p>
+    <h1 class="text-2xl font-semibold text-white">Ingest</h1>
+    <p class="text-sm text-[#9ca3af]">Upload sources and watch Qwen3 read them. Jobs survive tab close and server restart.</p>
 </div>
 
-<!-- Drag-drop upload zone -->
+<!-- Drop zone -->
 <div id="drop-zone"
-     class="bg-[#1c1f2a] border-2 border-dashed border-[#2a2e3a] rounded-lg p-8 mb-6 text-center transition hover:border-[#7c8cff] cursor-pointer">
-    <div class="text-4xl mb-3">📥</div>
-    <div class="text-white font-medium mb-1">Drop files here or click to upload</div>
-    <div class="text-xs text-[#9ca3af]">PDF · Markdown · HTML · DOCX · TXT</div>
-    <input type="file" id="file-input" multiple class="hidden"
+     class="drop-zone rounded-lg p-12 text-center cursor-pointer hover:bg-[#1a1e2c] transition mb-6">
+    <input type="file" id="file-input" class="hidden" multiple
            accept=".pdf,.md,.markdown,.html,.htm,.docx,.txt">
+    <div class="text-4xl mb-2">📥</div>
+    <div class="text-white font-medium mb-1">Drop files here or click to upload</div>
+    <div class="text-xs text-[#6b7280]">PDF · Markdown · HTML · DOCX · TXT</div>
 </div>
 
-<!-- Upload status -->
-<div id="upload-status" class="hidden mb-6"></div>
-
-<!-- Pending sources list -->
+<!-- Pending sources -->
+{% if pending %}
 <div class="mb-6">
-    <h2 class="text-sm font-semibold text-[#9ca3af] uppercase tracking-wide mb-3 flex items-center justify-between">
-        <span>Pending sources</span>
-        <a href="/sources" class="text-xs normal-case tracking-normal text-[#7c8cff] hover:text-[#9aa7ff]">Browse all sources →</a>
-    </h2>
-    <div id="pending-list" class="bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg overflow-hidden">
-        {% if pending_sources %}
-        <ul class="divide-y divide-[#2a2e3a]">
-            {% for src in pending_sources %}
-            <li class="px-4 py-3 flex items-center justify-between" data-source-id="{{ src.id }}">
-                <div class="flex items-center gap-3 min-w-0">
-                    <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-medium uppercase">{{ src.file_type }}</span>
-                    <span class="text-sm font-mono text-white truncate">{{ src.relpath }}</span>
-                </div>
-                <button class="ingest-btn text-xs px-3 py-1.5 bg-[#7c8cff] hover:bg-[#9aa7ff] text-white rounded font-medium transition"
-                        data-source-id="{{ src.id }}">
-                    Ingest →
-                </button>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <div class="px-4 py-8 text-center text-sm text-[#6b7280]">
-            No pending sources. Upload some files above to get started.
+    <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs uppercase tracking-wide text-[#9ca3af] font-medium">Pending sources</h2>
+        <a href="/sources" class="text-xs text-[#7c8cff] hover:text-[#9aa7ff]">Browse all sources →</a>
+    </div>
+    <div class="bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg divide-y divide-[#2a2e3a]">
+        {% for src in pending %}
+        <div class="flex items-center justify-between p-3 gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="state-badge bg-[#2a2e3a] text-[#facc15]">{{ src.file_type }}</span>
+                <code class="text-sm text-white truncate">{{ src.relpath }}</code>
+            </div>
+            <button type="button" class="start-job-btn text-xs px-3 py-1.5 bg-[#7c8cff] hover:bg-[#6a7bff] text-white rounded font-medium transition"
+                    data-source-id="{{ src.id }}">
+                Ingest →
+            </button>
         </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Active / recent jobs -->
+<div>
+    <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs uppercase tracking-wide text-[#9ca3af] font-medium">Recent jobs</h2>
+        <a href="/jobs" class="text-xs text-[#7c8cff] hover:text-[#9aa7ff]">All jobs →</a>
+    </div>
+    <div id="jobs-list" class="bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg divide-y divide-[#2a2e3a]">
+        {% if recent_jobs %}
+            {% for job in recent_jobs %}
+            <div class="job-card p-3" data-job-id="{{ job.id }}" data-state="{{ job.state }}">
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="state-badge state-{{ job.state }}">{{ job.state }}</span>
+                        <code class="text-sm text-white truncate">{{ job.source_relpath or ('(source #' ~ job.source_id ~ ')') }}</code>
+                    </div>
+                    <div class="flex items-center gap-3 flex-shrink-0">
+                        <span class="text-xs text-[#6b7280]">job #{{ job.id }}</span>
+                        <button type="button" class="watch-btn text-xs text-[#7c8cff] hover:text-[#9aa7ff]" data-job-id="{{ job.id }}">
+                            {% if job.state in ['running', 'queued'] %}Watch →{% else %}View log →{% endif %}
+                        </button>
+                    </div>
+                </div>
+                {% if job.state == 'running' or job.state == 'queued' %}
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" style="width: {{ (job.progress * 100) | round(0) }}%;"></div>
+                </div>
+                <div class="text-xs text-[#6b7280] mt-1">{{ job.phase or 'queued' }}</div>
+                {% elif job.state == 'done' %}
+                <div class="text-xs text-[#6b7280]">
+                    {{ job.pages_created }} created, {{ job.pages_updated }} updated
+                </div>
+                {% elif job.state == 'failed' or job.state == 'interrupted' %}
+                <div class="text-xs text-[#f87171] truncate">{{ job.error or 'Unknown error' }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="p-6 text-sm text-center text-[#6b7280]">No jobs yet. Upload a file to start.</div>
         {% endif %}
     </div>
 </div>
 
-<!-- Live ingest log -->
-<div id="ingest-log-container" class="hidden">
-    <h2 class="text-sm font-semibold text-[#9ca3af] uppercase tracking-wide mb-3">Live ingest log</h2>
-    <div id="ingest-log" class="bg-[#1c1f2a] border border-[#2a2e3a] rounded-lg p-5 space-y-3 max-h-[600px] overflow-auto">
-        <!-- Streaming events get appended here -->
+<!-- Live log for selected/started job (hidden until a job is being watched) -->
+<div id="job-watcher" class="hidden mt-6">
+    <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs uppercase tracking-wide text-[#9ca3af] font-medium">
+            Live log · job #<span id="watching-job-id"></span>
+        </h2>
+        <button type="button" id="close-watcher" class="text-xs text-[#6b7280] hover:text-white">✕ Close</button>
     </div>
+    <div class="live-log" id="live-log"></div>
 </div>
 
 <script>
 (function() {
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
-    const uploadStatus = document.getElementById('upload-status');
-    const pendingList = document.getElementById('pending-list');
-    const ingestLogContainer = document.getElementById('ingest-log-container');
-    const ingestLog = document.getElementById('ingest-log');
+    const jobsList = document.getElementById('jobs-list');
+    const watcher = document.getElementById('job-watcher');
+    const logEl = document.getElementById('live-log');
+    const watchingIdEl = document.getElementById('watching-job-id');
+    const closeWatcherBtn = document.getElementById('close-watcher');
 
-    // Drag-drop handlers
+    let activeStream = null;
+    let activeJobId = null;
+
+    // --- Upload ---
     dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('border-[#7c8cff]', 'bg-[#0f1117]');
-    });
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('border-[#7c8cff]', 'bg-[#0f1117]');
-    });
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
-        dropZone.classList.remove('border-[#7c8cff]', 'bg-[#0f1117]');
-        if (e.dataTransfer.files.length) {
-            handleFiles(e.dataTransfer.files);
-        }
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files);
     });
     fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length) handleFiles(e.target.files);
+        if (e.target.files.length > 0) uploadFiles(e.target.files);
     });
 
-    async function handleFiles(fileList) {
+    async function uploadFiles(files) {
         const fd = new FormData();
-        for (const f of fileList) fd.append('files', f, f.name);
-
-        uploadStatus.classList.remove('hidden');
-        uploadStatus.innerHTML = '<div class="text-sm text-[#9ca3af]">Uploading ' + fileList.length + ' file(s)…</div>';
-
-        try {
-            const r = await fetch('/ingest/upload', { method: 'POST', body: fd });
-            const data = await r.json();
-            const success = data.uploads.filter(u => u.ok).length;
-            const total = data.uploads.length;
-
-            const statusHtml = data.uploads.map(u => {
-                if (u.ok) {
-                    return `<div class="text-xs text-green-400">✓ ${u.name} → source #${u.source_id}</div>`;
-                } else {
-                    return `<div class="text-xs text-yellow-400">! ${u.name} — ${u.message || u.result}</div>`;
-                }
-            }).join('');
-
-            uploadStatus.innerHTML = `
-                <div class="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                    <div class="text-sm font-semibold text-green-300 mb-2">Uploaded ${success} of ${total} files</div>
-                    ${statusHtml}
-                    <div class="mt-3 text-xs text-[#9ca3af]">Reload the page to see them in the pending list.</div>
-                </div>
-            `;
-            // Reload to refresh the pending list
-            setTimeout(() => window.location.reload(), 1500);
-        } catch (e) {
-            uploadStatus.innerHTML = '<div class="text-sm text-red-400">Upload failed: ' + e.message + '</div>';
+        for (const f of files) fd.append('files', f);
+        const r = await fetch('/ingest/upload', { method: 'POST', body: fd });
+        if (r.ok) {
+            // Reload the page so the pending list refreshes
+            window.location.reload();
+        } else {
+            alert('Upload failed: ' + (await r.text()));
         }
     }
 
-    // Ingest button handlers
-    document.querySelectorAll('.ingest-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const sourceId = btn.dataset.sourceId;
-            startIngest(sourceId, btn);
+    // --- Start ingest ---
+    document.querySelectorAll('.start-job-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            btn.textContent = 'Starting…';
+            const fd = new FormData();
+            fd.append('source_id', btn.dataset.sourceId);
+            const r = await fetch('/ingest/start', { method: 'POST', body: fd });
+            if (r.ok) {
+                const data = await r.json();
+                watchJob(data.job_id);
+                // Reload after 1s so the jobs list shows the new job
+                setTimeout(() => window.location.reload(), 1200);
+            } else {
+                alert('Failed to start: ' + (await r.text()));
+                btn.disabled = false;
+                btn.textContent = 'Ingest →';
+            }
         });
     });
 
-    function logEntry(html, klass = '') {
+    // --- Watch a job (either active or historical) ---
+    document.querySelectorAll('.watch-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const jobId = parseInt(btn.dataset.jobId, 10);
+            // If we're already watching this exact job, just scroll to the log.
+            if (activeJobId === jobId && !watcher.classList.contains('hidden')) {
+                watcher.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                return;
+            }
+            watchJob(jobId);
+            // Smooth-scroll so user knows something happened
+            setTimeout(() => {
+                watcher.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 50);
+        });
+    });
+
+    closeWatcherBtn.addEventListener('click', () => {
+        if (activeStream) { activeStream.close(); activeStream = null; }
+        activeJobId = null;
+        watcher.classList.add('hidden');
+        logEl.innerHTML = '';
+    });
+
+    function logLine(html, cls = '') {
         const div = document.createElement('div');
-        div.className = klass;
+        div.className = 'log-line ' + cls;
         div.innerHTML = html;
-        ingestLog.appendChild(div);
-        ingestLog.scrollTop = ingestLog.scrollHeight;
+        logEl.appendChild(div);
+        logEl.scrollTop = logEl.scrollHeight;
     }
 
-    function startIngest(sourceId, btn) {
-        btn.disabled = true;
-        btn.textContent = 'Ingesting…';
-        btn.classList.add('opacity-50', 'cursor-not-allowed');
-
-        ingestLogContainer.classList.remove('hidden');
-        ingestLog.innerHTML = '';
-        logEntry('<div class="text-sm text-[#9ca3af]">Connecting to Ollama…</div>');
-
-        const es = new EventSource('/ingest/stream/' + sourceId);
-
-        es.addEventListener('start', (ev) => {
-            const data = JSON.parse(ev.data);
-            ingestLog.innerHTML = `
-                <div class="border-b border-[#2a2e3a] pb-3 mb-2">
-                    <div class="text-xs text-[#6b7280] uppercase tracking-wide mb-1">Ingesting source #${data.source_id}</div>
-                    <div class="text-sm font-mono text-white">${data.title}</div>
-                </div>
-            `;
-        });
+    function watchJob(jobId) {
+        if (activeStream) activeStream.close();
+        activeJobId = jobId;
+        watcher.classList.remove('hidden');
+        watchingIdEl.textContent = jobId;
+        logEl.innerHTML = '';
+        const es = new EventSource('/ingest/jobs/' + jobId + '/stream');
+        activeStream = es;
 
         es.addEventListener('status', (ev) => {
-            const data = JSON.parse(ev.data);
-            logEntry(`<div class="text-xs text-[#9aa7ff]">→ ${data.text}</div>`);
+            const d = JSON.parse(ev.data);
+            logLine('→ ' + escapeHtml(d.text), 'log-status');
         });
-
         es.addEventListener('extracted', (ev) => {
-            const data = JSON.parse(ev.data);
-            const entitiesHtml = data.entities.map(e =>
-                `<li class="text-xs text-[#9ca3af]">+ <span class="text-white">${e.name}</span> <span class="text-[#6b7280]">(${e.kind})</span></li>`
+            const d = JSON.parse(ev.data);
+            const ents = (d.entities || []).map(e =>
+                `<li class="text-xs text-[#9ca3af]">+ <span class="text-[#7c8cff]">${escapeHtml(e.slug)}</span> <span class="text-[#6b7280]">(${escapeHtml(e.type)})</span> <span class="text-white">${escapeHtml(e.name)}</span></li>`
             ).join('');
-            const conceptsHtml = data.concepts.map(c =>
-                `<li class="text-xs text-[#9ca3af]">+ <span class="text-white">${c.name}</span></li>`
+            const cons = (d.concepts || []).map(c =>
+                `<li class="text-xs text-[#9ca3af]">+ <span class="text-[#7c8cff]">${escapeHtml(c.slug)}</span> <span class="text-white">${escapeHtml(c.name)}</span></li>`
             ).join('');
-            logEntry(`
-                <div class="bg-[#0f1117] border border-[#2a2e3a] rounded p-3 mt-2">
-                    <div class="text-xs text-[#6b7280] uppercase tracking-wide mb-2">Extracted</div>
-                    <div class="text-sm text-white font-medium mb-2">${data.title}</div>
-                    <div class="text-xs text-[#9ca3af] mb-3">${data.summary}</div>
-                    ${data.entities.length ? `<div class="mb-2"><div class="text-xs text-[#6b7280] mb-1">Entities (${data.entities.length})</div><ul class="space-y-0.5">${entitiesHtml}</ul></div>` : ''}
-                    ${data.concepts.length ? `<div><div class="text-xs text-[#6b7280] mb-1">Concepts (${data.concepts.length})</div><ul class="space-y-0.5">${conceptsHtml}</ul></div>` : ''}
+            const block = `
+                <div class="log-extracted">
+                    <div class="text-xs text-[#6b7280] uppercase tracking-wide mb-1">Extracted</div>
+                    <div class="text-sm text-white font-medium mb-1">${escapeHtml(d.title || '')}</div>
+                    <div class="text-xs text-[#9ca3af] mb-2">${escapeHtml(d.summary || '')}</div>
+                    ${d.entities && d.entities.length ? `<div class="mb-1"><div class="text-xs text-[#6b7280]">Entities (${d.entities.length})</div><ul>${ents}</ul></div>` : ''}
+                    ${d.concepts && d.concepts.length ? `<div><div class="text-xs text-[#6b7280]">Concepts (${d.concepts.length})</div><ul>${cons}</ul></div>` : ''}
                 </div>
-            `);
+            `;
+            logLine(block);
         });
-
-        es.addEventListener('drafting', (ev) => {
-            const data = JSON.parse(ev.data);
-            logEntry(`<div class="text-xs text-[#9ca3af]"><span class="text-[#7c8cff]">${data.operation}</span> ${data.kind} <span class="font-mono text-white">${data.slug}</span></div>`);
+        es.addEventListener('page_start', (ev) => {
+            const d = JSON.parse(ev.data);
+            logLine(`  ${escapeHtml(d.operation)} ${escapeHtml(d.kind)} <span class="text-[#7c8cff]">${escapeHtml(d.slug)}</span>…`, 'log-status');
         });
-
-        es.addEventListener('page_written', (ev) => {
-            const data = JSON.parse(ev.data);
-            const op = data.operation === 'created' ? '+' : '↑';
-            const color = data.operation === 'created' ? 'text-green-400' : 'text-blue-400';
-            logEntry(`<div class="text-xs ${color}">${op} ${data.kind} <span class="font-mono">${data.path}</span></div>`);
+        es.addEventListener('page', (ev) => {
+            const d = JSON.parse(ev.data);
+            logLine(`  + ${escapeHtml(d.kind)} <span class="text-[#7c8cff]">${escapeHtml(d.path)}</span>`, 'log-page');
         });
-
-        es.addEventListener('complete', (ev) => {
-            const data = JSON.parse(ev.data);
-            logEntry(`
-                <div class="bg-green-500/10 border border-green-500/30 rounded p-3 mt-3">
-                    <div class="text-sm font-semibold text-green-300">✓ Ingested ${data.title}</div>
-                    <div class="text-xs text-[#9ca3af] mt-1">${data.created} created · ${data.updated} updated</div>
-                </div>
-            `);
-            es.close();
-            // Remove this source from the pending list visually
-            const li = pendingList.querySelector('li[data-source-id="' + sourceId + '"]');
-            if (li) li.remove();
-            // Auto-refresh after a short delay so the pending list updates
-            setTimeout(() => window.location.reload(), 2500);
-        });
-
         es.addEventListener('error', (ev) => {
-            try {
-                const data = JSON.parse(ev.data);
-                if (data && data.text) {
-                    logEntry(`<div class="text-sm text-red-400">✗ ${data.text}</div>`);
-                }
-            } catch (e) {
-                if (es.readyState === EventSource.CLOSED) {
-                    logEntry('<div class="text-sm text-red-400">Connection closed unexpectedly.</div>');
-                }
+            try { const d = JSON.parse(ev.data); logLine('✗ ' + escapeHtml(d.text), 'log-error'); } catch {}
+        });
+        es.addEventListener('done', (ev) => {
+            const d = JSON.parse(ev.data);
+            logLine(`✓ Done — ${d.pages_created} created, ${d.pages_updated} updated`, 'log-page');
+        });
+        es.addEventListener('job', (ev) => {
+            const d = JSON.parse(ev.data);
+            if (['done', 'failed', 'interrupted'].includes(d.state)) {
+                es.close();
+                activeStream = null;
             }
-            es.close();
-            btn.disabled = false;
-            btn.textContent = 'Retry';
-            btn.classList.remove('opacity-50', 'cursor-not-allowed');
         });
+        es.onerror = () => { /* retry handled by browser; stream may end */ };
+    }
 
-        es.addEventListener('done', () => {
-            es.close();
-        });
+    function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"']/g, c =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+        );
+    }
+
+    // Auto-watch a running job on page load (first one found)
+    const runningCard = jobsList && jobsList.querySelector('[data-state="running"]');
+    if (runningCard) {
+        const jobId = parseInt(runningCard.dataset.jobId, 10);
+        watchJob(jobId);
     }
 })();
 </script>

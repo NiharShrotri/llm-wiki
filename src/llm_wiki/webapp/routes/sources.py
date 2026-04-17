@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ... import config as cfg
 from ... import ingest_raw
@@ -143,3 +143,40 @@ async def source_detail(request: Request, source_id: int) -> HTMLResponse:
             "page": "sources",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Source mutation endpoints — delete and re-ingest
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{source_id}/delete")
+async def source_delete(request: Request, source_id: int) -> RedirectResponse:
+    """Delete a source from raw/ and remove its DB row.
+
+    Does NOT cascade to wiki pages — wiki pages created from this source
+    stay intact (matches the Karpathy 'wiki accumulates knowledge' pattern).
+    Run `wiki lint --fix` afterward to clean up any orphaned references.
+    """
+    paths: cfg.WikiPaths = request.app.state.wiki_paths
+    success, message = ingest_raw.remove_source(paths, source_id, delete_file=True)
+    if not success:
+        raise HTTPException(status_code=404, detail=message)
+    # Redirect to sources list with a flash-style message in the URL
+    return RedirectResponse(url="/sources", status_code=303)
+
+
+@router.post("/{source_id}/reingest")
+async def source_reingest(request: Request, source_id: int) -> RedirectResponse:
+    """Reset a source to 'pending' status so it can be re-ingested.
+
+    Useful when a previous ingest was interrupted, produced poor extractions,
+    or you want to retry with newer prompts. Doesn't touch wiki pages —
+    re-ingestion will use the merge path on existing pages.
+    """
+    paths: cfg.WikiPaths = request.app.state.wiki_paths
+    success, message = ingest_raw.mark_source_pending(paths, source_id)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    # Send the user to the ingest page where the source now appears in pending
+    return RedirectResponse(url="/ingest", status_code=303)
