@@ -6,7 +6,8 @@ Feel free to fork and don't forget to give it a Star ⭐️ for better reach!
 
 -------------------------
 Hello, I'm Nihar Shrotri, working as an AI Consultant.
-I'm currently pursuing my PhD in Artificial Intelligence and Machine Learning 
+I'm currently pursuing my PhD in Artificial Intelligence and Machine Learning
+
 Let's connect on LinkedIn for a Chat: https://www.linkedin.com/in/niharshrotri/
 -------------------------
 
