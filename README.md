@@ -2,6 +2,14 @@
 
 > A local, LLM-maintained personal knowledge base. Drop documents in, watch an LLM compile them into a living, interlinked Obsidian wiki you can search and query.
 
+Feel free to fork and don't forget to give it a Star ⭐️ for better reach!
+
+-------------------------
+Hello, I'm Nihar Shrotri, working as an AI Consultant.
+I'm currently pursuing my PhD in Artificial Intelligence and Machine Learning 
+Let's connect on LinkedIn for a Chat: https://www.linkedin.com/in/niharshrotri/
+-------------------------
+
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ollama](https://img.shields.io/badge/LLM-Qwen3--14B-purple.svg)](https://ollama.com/library/qwen3)
