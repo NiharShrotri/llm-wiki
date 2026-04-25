@@ -19,7 +19,7 @@ from typing import Generator, Iterator
 import httpx
 
 DEFAULT_HOST = "http://localhost:11434"
-DEFAULT_MODEL = "qwen3:14b"
+DEFAULT_MODEL = "gemma3:1b"
 DEFAULT_TIMEOUT = 300.0  # 5 minutes — thinking-mode extraction can be slow
 
 
